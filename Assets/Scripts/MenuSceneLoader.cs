@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
+[DisallowMultipleComponent]
 public class MenuSceneLoader : MonoBehaviour
 {
     [SerializeField] private Image fadeImage;

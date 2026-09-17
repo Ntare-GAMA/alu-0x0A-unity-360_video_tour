@@ -14,12 +14,12 @@ public class SceneNavigator : MonoBehaviour
 
     private bool isTransitioning = false;
 
-    void HideAll()
+    private void HideAll()
     {
-        livingRoom.SetActive(false);
-        cantina.SetActive(false);
-        cube.SetActive(false);
-        mezzanine.SetActive(false);
+        SetActive(livingRoom, false);
+        SetActive(cantina, false);
+        SetActive(cube, false);
+        SetActive(mezzanine, false);
     }
 
     public void GoToLivingRoom() => StartTransition(livingRoom);
@@ -29,7 +29,7 @@ public class SceneNavigator : MonoBehaviour
 
     private void StartTransition(GameObject target)
     {
-        if (!isTransitioning)
+        if (!isTransitioning && target != null)
         {
             StartCoroutine(FadeTransition(target));
         }
@@ -50,14 +50,23 @@ public class SceneNavigator : MonoBehaviour
         float elapsed = 0f;
         Color color = fadeImage.color;
 
-        while (elapsed < fadeDuration)
+        float duration = Mathf.Max(0f, fadeDuration);
+        while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(startAlpha, endAlpha, elapsed / fadeDuration);
+            float alpha = Mathf.Lerp(startAlpha, endAlpha, elapsed / duration);
             fadeImage.color = new Color(color.r, color.g, color.b, alpha);
             yield return null;
         }
 
         fadeImage.color = new Color(color.r, color.g, color.b, endAlpha);
+    }
+
+    private static void SetActive(GameObject target, bool isActive)
+    {
+        if (target != null)
+        {
+            target.SetActive(isActive);
+        }
     }
 }

@@ -38,5 +38,6 @@ public class MenuSceneLoader : MonoBehaviour
         }
 
         SceneManager.LoadScene(sceneName);
+        isLoading = false;
     }
 }

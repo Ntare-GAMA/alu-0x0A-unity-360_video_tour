@@ -6,6 +6,7 @@ using UnityEngine.UI;
 public class MenuSceneLoader : MonoBehaviour
 {
     [SerializeField] private Image fadeImage;
+    [Min(0f)]
     [SerializeField] private float fadeDuration = 0.5f;
 
     private bool isLoading;

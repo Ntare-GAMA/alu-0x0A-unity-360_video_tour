@@ -8,7 +8,25 @@ public class InfoPanelToggle : MonoBehaviour
     {
         if (panel != null)
         {
-            panel.SetActive(!panel.activeSelf);
+            SetVisible(!panel.activeSelf);
+        }
+    }
+
+    public void Show()
+    {
+        SetVisible(true);
+    }
+
+    public void Hide()
+    {
+        SetVisible(false);
+    }
+
+    private void SetVisible(bool isVisible)
+    {
+        if (panel != null)
+        {
+            panel.SetActive(isVisible);
         }
     }
 }

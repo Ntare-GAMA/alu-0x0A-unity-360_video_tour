@@ -118,3 +118,6 @@ META Build*
 unity-360_video_tour_BurstDebugInformation_DoNotShip/
 .utmp/
 *.apk.meta
+
+# Optional vendor packages should be distributed outside GitHub's file limit.
+/Packages/*.tgz

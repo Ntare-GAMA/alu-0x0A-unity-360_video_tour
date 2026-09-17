@@ -104,3 +104,17 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+Library/
+Temp/
+Logs/
+UserSettings/
+obj/
+*.csproj
+*.slnx
+*.sln
+build/
+META Build*
+unity-360_video_tour_BurstDebugInformation_DoNotShip/
+.utmp/
+*.apk.meta

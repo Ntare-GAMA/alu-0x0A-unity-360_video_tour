@@ -13,11 +13,11 @@ public class CampusTourNavigator : MonoBehaviour
 
     private bool isTransitioning = false;
 
-    void HideAll()
+    private void HideAll()
     {
-        stairs.SetActive(false);
-        entrance.SetActive(false);
-        fabLab.SetActive(false);
+        SetActive(stairs, false);
+        SetActive(entrance, false);
+        SetActive(fabLab, false);
     }
 
     public void GoToStairs() => StartTransition(stairs);
@@ -26,7 +26,7 @@ public class CampusTourNavigator : MonoBehaviour
 
     private void StartTransition(GameObject target)
     {
-        if (!isTransitioning)
+        if (!isTransitioning && target != null)
         {
             StartCoroutine(FadeTransition(target));
         }
@@ -52,14 +52,23 @@ public class CampusTourNavigator : MonoBehaviour
         float elapsed = 0f;
         Color color = fadeImage.color;
 
-        while (elapsed < fadeDuration)
+        float duration = Mathf.Max(0f, fadeDuration);
+        while (elapsed < duration)
         {
             elapsed += Time.deltaTime;
-            float alpha = Mathf.Lerp(startAlpha, endAlpha, elapsed / fadeDuration);
+            float alpha = Mathf.Lerp(startAlpha, endAlpha, elapsed / duration);
             fadeImage.color = new Color(color.r, color.g, color.b, alpha);
             yield return null;
         }
 
         fadeImage.color = new Color(color.r, color.g, color.b, endAlpha);
+    }
+
+    private static void SetActive(GameObject target, bool isActive)
+    {
+        if (target != null)
+        {
+            target.SetActive(isActive);
+        }
     }
 }

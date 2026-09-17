@@ -9,6 +9,8 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using TMPro;
 using Unity.XR.CoreUtils;
+using UnityEngine.XR.Interaction.Toolkit.UI;
+using UnityEngine.XR.Interaction.Toolkit.Locomotion.Gravity;
 
 public static class ProjectFixups
 {
@@ -273,6 +275,11 @@ public static class ProjectFixups
         var rigInstance = (GameObject)PrefabUtility.InstantiatePrefab(rigPrefab, scene);
         rigInstance.name = "XR Origin (XR Rig)";
         var xrOrigin = rigInstance.GetComponent<XROrigin>();
+        // Explicitly request Floor tracking: on OpenXR this defaulted to "NotSpecified",
+        // which resolves to device-relative (head-height-origin) tracking rather than true
+        // floor tracking, so CameraYOffset was being stacked on top of an already-elevated
+        // origin instead of being zeroed out for floor mode, spawning the player ~1m above the ground.
+        xrOrigin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
         xrOrigin.CameraYOffset = cameraYOffset;
         var newCamera = xrOrigin.Camera;
 
@@ -327,6 +334,336 @@ public static class ProjectFixups
 
     // One-off repair for scenes already processed by AddXrRigToScene before the
     // FindObjectsInactive.Include fix: fills in any Canvas still left with a null worldCamera.
+    // One-off repair for scenes whose rig was added before RequestedTrackingOriginMode
+    // was explicitly set to Floor (see AddXrRigToScene) - fixes the "spawns floating
+    // above the ground" bug without needing to re-instantiate the whole rig.
+    // Plain GraphicRaycaster does 2D screen-space hit testing via the Canvas's assigned
+    // camera - it cannot do real 3D ray intersection, so an XR Ray Interactor's ray never
+    // registers a hit against a world-space Canvas using it (the ray visually passes
+    // through, and buttons never receive click events). World-space canvases driven by
+    // XR ray interactors need TrackedDeviceGraphicRaycaster instead.
+    [MenuItem("Tools/Project Fixups/C4 - Fix World-Space Canvas Raycasters")]
+    public static void FixWorldSpaceCanvasRaycasters()
+    {
+        FixCanvasRaycastersInScene("Assets/Scenes/MainMenuScene.unity");
+        FixCanvasRaycastersInScene("Assets/Scenes/IntranetTourScene.unity");
+        FixCanvasRaycastersInScene("Assets/Scenes/CustomCampusTourScene.unity");
+        Debug.Log("[Fixups] Step C4 complete.");
+    }
+
+    private static void FixCanvasRaycastersInScene(string scenePath)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        int fixedCount = 0;
+
+        foreach (var canvas in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            if (canvas.renderMode != RenderMode.WorldSpace) continue;
+
+            var go = canvas.gameObject;
+            var oldRaycaster = go.GetComponent<GraphicRaycaster>();
+            if (oldRaycaster == null || go.GetComponent<TrackedDeviceGraphicRaycaster>() != null) continue;
+
+            Object.DestroyImmediate(oldRaycaster);
+            go.AddComponent<TrackedDeviceGraphicRaycaster>();
+            fixedCount++;
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log($"[Fixups] Converted {fixedCount} canvas raycaster(s) to TrackedDeviceGraphicRaycaster in {scenePath}");
+    }
+
+    // XR Interaction Toolkit's Ray Interactors only register themselves with XRI's own
+    // XRUIInputModule (via RegisteredUIInteractorCache.FindOrCreateXRUIInputModule, which
+    // looks specifically for that type) - they cannot drive the core Input System package's
+    // InputSystemUIInputModule at all, even with xrTrackingOrigin set. Since this project's
+    // EventSystems use InputSystemUIInputModule, ray interactors were never actually wired
+    // to the UI event pipeline, regardless of raycaster type on the canvas.
+    // Each panorama is a tiny (0.5m radius) sphere sitting at world Y=0, with its hotspot
+    // buttons positioned close to that same center - the design assumes the camera sits
+    // almost exactly at the sphere's center. Floor-tracked VR puts the camera at real eye
+    // height above the real floor (~1.6-1.8m), nowhere near Y=0, so the ray fired from
+    // hand height never comes close to the buttons. Raising each sphere (and everything
+    // attached to it, since the canvases are children defined in local space) up to
+    // Y=1.1176 - the same eye-height constant already used everywhere else in this project
+    // (XR Core Utils' own default eye offset, and what the original hand-built rig used)
+    // re-centers the tiny sphere on the camera without touching scale, so no button/text
+    // sizes change at all.
+    // The Starter Assets XR rig includes a full locomotion system (walk, jump, climb,
+    // gravity) meant for room-scale games. This app is a stationary point-and-click
+    // panorama viewer - there's no floor to walk on, just small decorative spheres
+    // surrounding the camera, so the CharacterController's gravity was pulling the
+    // player down through empty space (nothing solid at real floor level) whenever
+    // it didn't detect the panorama sphere directly underfoot as "ground".
+    // ---------- Back button (Intranet + Custom Campus -> Main Menu) + background music (Custom Campus) ----------
+    [MenuItem("Tools/Project Fixups/G - Add Back Buttons And Music")]
+    public static void AddBackButtonsAndMusic()
+    {
+        AssetDatabase.Refresh();
+        ConfigureMusicImportSettings();
+        AddBackButtonToScene("Assets/Scenes/IntranetTourScene.unity");
+        AddBackButtonToScene("Assets/Scenes/CustomCampusTourScene.unity");
+        AddBackgroundMusicToScene("Assets/Scenes/CustomCampusTourScene.unity", "TourManager");
+        Debug.Log("[Fixups] Step G complete.");
+    }
+
+    private static void AddBackButtonToScene(string scenePath)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        var cam = Camera.main;
+        if (cam == null) { Debug.LogError($"[Fixups] No main camera in {scenePath}"); return; }
+
+        var fadeImageGO = FindInScene("FadeImage");
+        var fadeImage = fadeImageGO != null ? fadeImageGO.GetComponent<Image>() : null;
+
+        var loaderGO = FindInScene("MenuSceneLoader");
+        if (loaderGO == null) loaderGO = new GameObject("MenuSceneLoader");
+        var loader = loaderGO.GetComponent<MenuSceneLoader>();
+        if (loader == null) loader = loaderGO.AddComponent<MenuSceneLoader>();
+        var loaderSo = new SerializedObject(loader);
+        loaderSo.FindProperty("fadeImage").objectReferenceValue = fadeImage;
+        loaderSo.ApplyModifiedPropertiesWithoutUndo();
+
+        // World-space canvas anchored to the camera, in the lower part of the view, so it's
+        // reachable no matter which panorama/room is currently active.
+        var canvasGO = new GameObject("BackButtonCanvas", typeof(RectTransform));
+        canvasGO.transform.SetParent(cam.transform, false);
+        canvasGO.transform.localPosition = new Vector3(0f, -0.25f, 0.6f);
+        canvasGO.transform.localRotation = Quaternion.identity;
+        canvasGO.transform.localScale = Vector3.one * 0.001f;
+        var canvas = canvasGO.AddComponent<Canvas>();
+        canvas.renderMode = RenderMode.WorldSpace;
+        canvas.worldCamera = cam;
+        var canvasRt = canvasGO.GetComponent<RectTransform>();
+        canvasRt.sizeDelta = new Vector2(220, 70);
+        canvasGO.AddComponent<TrackedDeviceGraphicRaycaster>();
+
+        var buttonGO = new GameObject("BackButton", typeof(RectTransform));
+        buttonGO.transform.SetParent(canvasGO.transform, false);
+        var buttonRt = buttonGO.GetComponent<RectTransform>();
+        buttonRt.anchorMin = Vector2.zero;
+        buttonRt.anchorMax = Vector2.one;
+        buttonRt.sizeDelta = Vector2.zero;
+        var buttonImage = buttonGO.AddComponent<Image>();
+        buttonImage.color = new Color(0.12f, 0.12f, 0.14f, 0.9f);
+        var button = buttonGO.AddComponent<Button>();
+        var colors = button.colors;
+        colors.highlightedColor = new Color(0.3f, 0.3f, 0.34f, 0.95f);
+        colors.pressedColor = new Color(0.05f, 0.05f, 0.06f, 0.95f);
+        button.colors = colors;
+
+        var textGO = new GameObject("Text (TMP)", typeof(RectTransform));
+        textGO.transform.SetParent(buttonGO.transform, false);
+        var textRt = textGO.GetComponent<RectTransform>();
+        textRt.anchorMin = Vector2.zero;
+        textRt.anchorMax = Vector2.one;
+        textRt.sizeDelta = Vector2.zero;
+        var tmp = textGO.AddComponent<TextMeshProUGUI>();
+        tmp.text = "Back to Menu";
+        tmp.fontSize = 24;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = Color.white;
+
+        UnityEventTools.AddStringPersistentListener(button.onClick, loader.LoadScene, "MainMenuScene");
+        EditorUtility.SetDirty(button);
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log($"[Fixups] Added Back to Menu button in {scenePath}");
+    }
+
+    private static void AddBackgroundMusicToScene(string scenePath, string hostObjectName)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+
+        var clip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/Audio/AmbientTourTheme.wav");
+        if (clip == null) { Debug.LogError($"[Fixups] Music clip not found for {scenePath}"); return; }
+
+        var hostGO = FindInScene(hostObjectName);
+        if (hostGO == null) { hostGO = new GameObject(hostObjectName); }
+
+        var source = hostGO.GetComponent<AudioSource>();
+        if (source == null) source = hostGO.AddComponent<AudioSource>();
+        source.clip = clip;
+        source.loop = true;
+        source.playOnAwake = true;
+        source.spatialBlend = 0f;
+        source.volume = 0.35f;
+        EditorUtility.SetDirty(source);
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log($"[Fixups] Added looping background music to {scenePath}");
+    }
+
+    private static void ConfigureMusicImportSettings()
+    {
+        var importer = AssetImporter.GetAtPath("Assets/Audio/AmbientTourTheme.wav") as AudioImporter;
+        if (importer == null) { Debug.LogError("[Fixups] Music AudioImporter not found"); return; }
+
+        var settings = importer.defaultSampleSettings;
+        settings.loadType = AudioClipLoadType.Streaming;
+        settings.compressionFormat = AudioCompressionFormat.Vorbis;
+        settings.quality = 0.7f;
+        importer.defaultSampleSettings = settings;
+        importer.forceToMono = true;
+        importer.SaveAndReimport();
+        Debug.Log("[Fixups] Configured music import settings.");
+    }
+
+    [MenuItem("Tools/Project Fixups/C7 - Disable Gravity Locomotion")]
+    public static void DisableGravityLocomotion()
+    {
+        DisableGravityInScene("Assets/Scenes/MainMenuScene.unity");
+        DisableGravityInScene("Assets/Scenes/IntranetTourScene.unity");
+        DisableGravityInScene("Assets/Scenes/CustomCampusTourScene.unity");
+        Debug.Log("[Fixups] Step C7 complete.");
+    }
+
+    private static void DisableGravityInScene(string scenePath)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        var gravityGO = FindInScene("Gravity");
+        if (gravityGO == null) { Debug.LogError($"[Fixups] No Gravity locomotion object found in {scenePath}"); return; }
+
+        var provider = gravityGO.GetComponent<GravityProvider>();
+        if (provider == null) { Debug.LogError($"[Fixups] No GravityProvider on Gravity object in {scenePath}"); return; }
+
+        provider.useGravity = false;
+        EditorUtility.SetDirty(provider);
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log($"[Fixups] Disabled gravity locomotion in {scenePath}");
+    }
+
+    // Follow-up to C6: 1.1176m put the player near the top of the (still tiny) sphere,
+    // meaning their real floor-tracked standing eye height is higher than that constant.
+    // Rather than chase an exact number blindly, raise the target height to a more
+    // realistic standing average AND scale each sphere up several times over so whatever
+    // residual mismatch remains between the guess and the real height is only a small
+    // fraction of the sphere's radius instead of a large one. The per-sphere Canvas's
+    // own scale is divided back down by the same factor so button/text sizes don't change.
+    [MenuItem("Tools/Project Fixups/C8 - Recenter And Enlarge Panorama Spheres")]
+    public static void RecenterAndEnlargePanoramaSpheres()
+    {
+        const float eyeHeight = 1.65f;
+        const float scaleFactor = 4f;
+        RecenterAndScaleInScene("Assets/Scenes/CustomCampusTourScene.unity", new[] { "Fab_Lab", "Stairs", "Entrance" }, eyeHeight, scaleFactor);
+        RecenterAndScaleInScene("Assets/Scenes/IntranetTourScene.unity", new[] { "LivingRoom", "Cantina", "Cube", "Mezzanine" }, eyeHeight, scaleFactor);
+        Debug.Log("[Fixups] Step C8 complete.");
+    }
+
+    private static void RecenterAndScaleInScene(string scenePath, string[] rootNames, float y, float scaleFactor)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        foreach (var name in rootNames)
+        {
+            var go = FindInScene(name);
+            if (go == null) { Debug.LogError($"[Fixups] Sphere root not found: {name} in {scenePath}"); continue; }
+
+            var pos = go.transform.position;
+            go.transform.position = new Vector3(pos.x, y, pos.z);
+            go.transform.localScale = Vector3.one * scaleFactor;
+            EditorUtility.SetDirty(go.transform);
+
+            foreach (Transform child in go.transform)
+            {
+                var canvas = child.GetComponent<Canvas>();
+                if (canvas == null) continue;
+                child.localScale = child.localScale / scaleFactor;
+                EditorUtility.SetDirty(child);
+            }
+
+            Debug.Log($"[Fixups] {name}: y={y}, scale={scaleFactor}x, canvas compensated in {scenePath}");
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+    }
+
+    [MenuItem("Tools/Project Fixups/C6 - Raise Panorama Spheres To Eye Height")]
+    public static void RaisePanoramaSpheresToEyeHeight()
+    {
+        const float eyeHeight = 1.1176f;
+        RaiseSpheresInScene("Assets/Scenes/CustomCampusTourScene.unity", new[] { "Fab_Lab", "Stairs", "Entrance" }, eyeHeight);
+        RaiseSpheresInScene("Assets/Scenes/IntranetTourScene.unity", new[] { "LivingRoom", "Cantina", "Cube", "Mezzanine" }, eyeHeight);
+        Debug.Log("[Fixups] Step C6 complete.");
+    }
+
+    private static void RaiseSpheresInScene(string scenePath, string[] rootNames, float y)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        foreach (var name in rootNames)
+        {
+            var go = FindInScene(name);
+            if (go == null) { Debug.LogError($"[Fixups] Sphere root not found: {name} in {scenePath}"); continue; }
+            var pos = go.transform.position;
+            go.transform.position = new Vector3(pos.x, y, pos.z);
+            EditorUtility.SetDirty(go.transform);
+            Debug.Log($"[Fixups] Raised {name} to y={y} in {scenePath}");
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+    }
+
+    [MenuItem("Tools/Project Fixups/C5 - Fix EventSystem Input Module For XRI")]
+    public static void FixEventSystemInputModule()
+    {
+        FixEventSystemInputModuleInScene("Assets/Scenes/MainMenuScene.unity");
+        FixEventSystemInputModuleInScene("Assets/Scenes/IntranetTourScene.unity");
+        FixEventSystemInputModuleInScene("Assets/Scenes/CustomCampusTourScene.unity");
+        Debug.Log("[Fixups] Step C5 complete.");
+    }
+
+    private static void FixEventSystemInputModuleInScene(string scenePath)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        var eventSystemGO = FindInScene("EventSystem");
+        if (eventSystemGO == null) { Debug.LogError($"[Fixups] No EventSystem found in {scenePath}"); return; }
+
+        var oldModule = eventSystemGO.GetComponent<InputSystemUIInputModule>();
+        if (oldModule != null)
+        {
+            Object.DestroyImmediate(oldModule);
+        }
+
+        if (eventSystemGO.GetComponent<XRUIInputModule>() == null)
+        {
+            eventSystemGO.AddComponent<XRUIInputModule>();
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log($"[Fixups] Swapped EventSystem input module to XRUIInputModule in {scenePath}");
+    }
+
+    [MenuItem("Tools/Project Fixups/C1 - Repair Tracking Origin Mode")]
+    public static void RepairTrackingOriginMode()
+    {
+        RepairTrackingOriginModeInScene("Assets/Scenes/CustomCampusTourScene.unity");
+        RepairTrackingOriginModeInScene("Assets/Scenes/IntranetTourScene.unity");
+        RepairTrackingOriginModeInScene("Assets/Scenes/MainMenuScene.unity");
+        Debug.Log("[Fixups] Step C1 complete.");
+    }
+
+    private static void RepairTrackingOriginModeInScene(string scenePath)
+    {
+        var scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        var rigGO = FindInScene("XR Origin (XR Rig)");
+        if (rigGO == null) { Debug.LogError($"[Fixups] No XR rig found in {scenePath}"); return; }
+
+        var xrOrigin = rigGO.GetComponent<XROrigin>();
+        xrOrigin.RequestedTrackingOriginMode = XROrigin.TrackingOriginMode.Floor;
+        EditorUtility.SetDirty(xrOrigin);
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log($"[Fixups] Set RequestedTrackingOriginMode=Floor in {scenePath}");
+    }
+
     [MenuItem("Tools/Project Fixups/C2 - Repair Canvas Camera Refs")]
     public static void RepairCanvasCameraRefs()
     {

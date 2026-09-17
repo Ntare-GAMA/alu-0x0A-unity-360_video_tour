@@ -27,10 +27,11 @@ public class MenuSceneLoader : MonoBehaviour
         {
             float elapsed = 0f;
             Color color = fadeImage.color;
-            while (elapsed < fadeDuration)
+            float duration = Mathf.Max(0f, fadeDuration);
+            while (elapsed < duration)
             {
                 elapsed += Time.deltaTime;
-                float alpha = Mathf.Lerp(0f, 1f, elapsed / fadeDuration);
+                float alpha = Mathf.Lerp(0f, 1f, elapsed / duration);
                 fadeImage.color = new Color(color.r, color.g, color.b, alpha);
                 yield return null;
             }

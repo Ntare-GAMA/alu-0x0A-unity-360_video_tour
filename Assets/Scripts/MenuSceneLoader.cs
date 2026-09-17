@@ -8,8 +8,16 @@ public class MenuSceneLoader : MonoBehaviour
     [SerializeField] private Image fadeImage;
     [SerializeField] private float fadeDuration = 0.5f;
 
+    private bool isLoading;
+
     public void LoadScene(string sceneName)
     {
+        if (isLoading || string.IsNullOrWhiteSpace(sceneName))
+        {
+            return;
+        }
+
+        isLoading = true;
         StartCoroutine(FadeAndLoad(sceneName));
     }
 

@@ -498,6 +498,37 @@ public static class ProjectFixups
         Debug.Log($"[Fixups] Wired {path} -> load {sceneName}");
     }
 
+    // ---------- Step C3: Intranet's fade canvas is Screen Space Overlay, which doesn't
+    // render correctly in a VR headset. Give it the same camera-child world-space fade
+    // used in the custom campus scene, and retire the old one. ----------
+    [MenuItem("Tools/Project Fixups/C3 - Fix Intranet Fade Canvas")]
+    public static void FixIntranetFadeCanvas()
+    {
+        var scene = EditorSceneManager.OpenScene("Assets/Scenes/IntranetTourScene.unity", OpenSceneMode.Single);
+
+        var cam = Camera.main;
+        if (cam == null) { Debug.LogError("[Fixups] No main camera found in IntranetTourScene"); return; }
+
+        var navGO = FindInScene("XR Interaction Manager");
+        var nav = navGO != null ? navGO.GetComponent<SceneNavigator>() : null;
+        if (nav == null) { Debug.LogError("[Fixups] SceneNavigator not found on XR Interaction Manager"); return; }
+
+        var fadeImage = CreateCameraFadeOverlay(cam.transform);
+        var so = new SerializedObject(nav);
+        so.FindProperty("fadeImage").objectReferenceValue = fadeImage;
+        so.ApplyModifiedPropertiesWithoutUndo();
+
+        var oldFadeCanvas = FindInScene("FadeCanvas");
+        if (oldFadeCanvas != null)
+        {
+            Object.DestroyImmediate(oldFadeCanvas);
+        }
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        Debug.Log("[Fixups] Step C3 complete: Intranet fade canvas replaced with world-space version.");
+    }
+
     // ---------- Step E: fix Build Settings scene list ----------
     [MenuItem("Tools/Project Fixups/E - Fix Build Settings Scene List")]
     public static void FixBuildSettingsScenes()
@@ -510,6 +541,35 @@ public static class ProjectFixups
         };
         EditorBuildSettings.scenes = scenes;
         Debug.Log("[Fixups] Step E complete: Build Settings scene list updated.");
+    }
+
+    // Exports the raw Android Gradle project (no APK) so Gradle can be invoked manually
+    // with an explicit -Djavax.net.ssl.trustStore flag, bypassing Unity's internal Gradle
+    // invocation which doesn't reliably forward JAVA_TOOL_OPTIONS/GRADLE_OPTS from the
+    // environment to its child java.exe process.
+    [MenuItem("Tools/Project Fixups/F0 - Export Android Gradle Project")]
+    public static void ExportAndroidGradleProject()
+    {
+        var scenePaths = EditorBuildSettings.scenes.Where(s => s.enabled).Select(s => s.path).ToArray();
+        var outputDir = System.IO.Path.GetFullPath("build/GradleProject");
+        if (System.IO.Directory.Exists(outputDir))
+        {
+            System.IO.Directory.Delete(outputDir, true);
+        }
+
+        EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
+
+        var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions
+        {
+            scenes = scenePaths,
+            locationPathName = outputDir,
+            target = BuildTarget.Android,
+            options = BuildOptions.None
+        });
+
+        EditorUserBuildSettings.exportAsGoogleAndroidProject = false;
+
+        Debug.Log($"[Fixups] Gradle project export result: {report.summary.result}, path: {outputDir}");
     }
 
     // ---------- Step F: build the Android/Quest APK ----------
@@ -530,6 +590,68 @@ public static class ProjectFixups
         });
 
         Debug.Log($"[Fixups] Build result: {report.summary.result}, size: {report.summary.totalSize} bytes, path: {outputPath}");
+    }
+
+    [MenuItem("Tools/Project Fixups/Verify - Sanity Check All Scenes")]
+    public static void VerifyAllScenes()
+    {
+        VerifyScene("Assets/Scenes/MainMenuScene.unity");
+        VerifyScene("Assets/Scenes/IntranetTourScene.unity");
+        VerifyScene("Assets/Scenes/CustomCampusTourScene.unity");
+        Debug.Log("[Fixups] Verify complete.");
+    }
+
+    private static void VerifyScene(string scenePath)
+    {
+        EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        Debug.Log($"[Verify] === {scenePath} ===");
+
+        var rig = FindInScene("XR Origin (XR Rig)");
+        Debug.Log($"[Verify] XR rig present: {rig != null}");
+
+        var cam = Camera.main;
+        Debug.Log($"[Verify] Camera.main: {(cam != null ? cam.name : "NULL")}");
+
+        var eventSystem = FindInScene("EventSystem");
+        var uiModule = eventSystem != null ? eventSystem.GetComponent<InputSystemUIInputModule>() : null;
+        Debug.Log($"[Verify] EventSystem present: {eventSystem != null}, XRTrackingOrigin set: {(uiModule != null && uiModule.xrTrackingOrigin != null)}");
+
+        int nullCanvasCamera = 0, totalCanvases = 0;
+        foreach (var canvas in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            totalCanvases++;
+            if (canvas.renderMode == RenderMode.WorldSpace && canvas.worldCamera == null) nullCanvasCamera++;
+        }
+        Debug.Log($"[Verify] Canvases: {totalCanvases}, world-space with null camera: {nullCanvasCamera}");
+
+        int brokenButtons = 0, totalButtons = 0;
+        foreach (var button in Object.FindObjectsByType<Button>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            totalButtons++;
+            for (int i = 0; i < button.onClick.GetPersistentEventCount(); i++)
+            {
+                if (button.onClick.GetPersistentTarget(i) == null)
+                {
+                    brokenButtons++;
+                    Debug.LogWarning($"[Verify] Button '{GetPath(button.transform)}' has a null persistent target (method: {button.onClick.GetPersistentMethodName(i)})");
+                }
+            }
+        }
+        Debug.Log($"[Verify] Buttons: {totalButtons}, with null persistent target: {brokenButtons}");
+
+        var audioListeners = Object.FindObjectsByType<AudioListener>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+        Debug.Log($"[Verify] AudioListeners: {audioListeners.Length}");
+    }
+
+    private static string GetPath(Transform t)
+    {
+        var path = t.name;
+        while (t.parent != null)
+        {
+            t = t.parent;
+            path = t.name + "/" + path;
+        }
+        return path;
     }
 
     [MenuItem("Tools/Project Fixups/Run All (A-E, no build)")]

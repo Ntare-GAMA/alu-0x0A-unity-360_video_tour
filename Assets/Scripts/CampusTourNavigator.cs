@@ -2,6 +2,7 @@ using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 
+[DisallowMultipleComponent]
 public class CampusTourNavigator : MonoBehaviour
 {
     [SerializeField] private GameObject stairs;

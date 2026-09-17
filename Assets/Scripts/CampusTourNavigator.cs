@@ -9,6 +9,7 @@ public class CampusTourNavigator : MonoBehaviour
     [SerializeField] private GameObject fabLab;
 
     [SerializeField] private Image fadeImage;
+    [Min(0f)]
     [SerializeField] private float fadeDuration = 0.5f;
 
     private bool isTransitioning = false;

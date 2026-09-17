@@ -10,6 +10,7 @@ public class SceneNavigator : MonoBehaviour
     [SerializeField] private GameObject mezzanine;
 
     [SerializeField] private Image fadeImage;
+    [Min(0f)]
     [SerializeField] private float fadeDuration = 0.5f;
 
     private bool isTransitioning = false;

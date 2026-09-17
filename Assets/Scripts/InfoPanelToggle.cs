@@ -1,8 +1,11 @@
 using UnityEngine;
 
+[DisallowMultipleComponent]
 public class InfoPanelToggle : MonoBehaviour
 {
     [SerializeField] private GameObject panel;
+
+    public bool IsVisible => panel != null && panel.activeSelf;
 
     public void Toggle()
     {
